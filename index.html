@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>GeoPlot 高清土質與強度分析儀</title>
+  <title>GeoPlot 高清地質與岩土強度分析儀</title>
   <style>
     :root {
       --primary: #0f172a;
@@ -137,24 +137,23 @@
 
 <div class="container">
   <header>
-    <h1>GeoPlot 高清土質與強度分析儀</h1>
-    <p>直覺式土質判定・動態捕捉平滑漸變與夾層邊界</p>
+    <h1>GeoPlot 高清地質與岩土強度分析儀</h1>
+    <p>全頻寬材質鑑別：直接告訴你是爛泥、黏土、砂土、碎石還是岩石</p>
   </header>
 
   <div class="card">
-    <div class="card-title">1. 上傳高清原圖與指定掃描線</div>
+    <div class="card-title">1. 上傳剖面圖與指定掃描線</div>
 
     <div class="upload-box">
       <input type="file" accept="image/*" onchange="loadImage(this.files[0])">
       <div style="font-weight:700; color:#dc2626;">📷 點此上傳高清剖面圖</div>
-      <div style="font-size:0.75rem; color:#64748b;">上傳後，點擊地層長條柱的中心位置，程式將沿該直線進行深層解析</div>
+      <div style="font-size:0.75rem; color:#64748b;">上傳後，點擊彩色柱的中心，程式將自動貫穿解析</div>
     </div>
 
     <div class="canvas-wrap" id="canvasWrap" style="display:none;">
       <canvas id="mainCanvas" onclick="pickAndAnalyze(event)"></canvas>
     </div>
 
-    <!-- 點擊即時診斷 -->
     <div class="sample-bar" id="sampleBar" style="display:none;">
       <div style="display:flex; align-items:center; gap:8px;">
         <div id="chipColor" class="color-chip"></div>
@@ -166,13 +165,12 @@
   </div>
 
   <div class="card" id="outCard" style="display:none;">
-    <div class="card-title">2. 全深度動態切層與物理參數報告</div>
+    <div class="card-title">2. 全深度動態切層與地層材質報告</div>
     <div id="layersContainer"></div>
   </div>
 
   <footer>
-    色彩引擎：HSV 色相連續插值法 (Continuous Hue Interpolation)<br>
-    切層引擎：累積波速漂移演算法 (Cumulative Drift Threshold)
+    色彩引擎：HSV 連續插值法 (支援 40 m/s ~ 660 m/s 全範圍)
   </footer>
 </div>
 
@@ -180,7 +178,6 @@
 let img = new Image();
 let offCanvas = document.createElement('canvas');
 
-// 建立高密度的連續色相查詢表 (Hue to Vs)
 function getContinuousVs(r, g, b) {
   if ((r > 240 && g > 240 && b > 240) || (r < 40 && g < 40 && b < 40)) return null;
 
@@ -221,12 +218,16 @@ function getContinuousVs(r, g, b) {
 }
 
 function getColorColor(vs) {
-  if (vs < 50) return "#e100e1";
-  if (vs < 75) return "#eb0000";
-  if (vs < 90) return "#f55000";
-  if (vs < 115) return "#fa8200";
-  if (vs < 130) return "#ffb400";
-  return "#ffe100";
+  if (vs < 50) return "#e100e1"; // 洋紅
+  if (vs < 75) return "#eb0000"; // 紅
+  if (vs < 90) return "#f55000"; // 橙紅
+  if (vs < 115) return "#fa8200"; // 橘
+  if (vs < 130) return "#ffb400"; // 橙黃
+  if (vs < 160) return "#ffe100"; // 黃
+  if (vs < 220) return "#a3e635"; // 淺綠
+  if (vs < 300) return "#22c55e"; // 綠
+  if (vs < 450) return "#3b82f6"; // 藍
+  return "#8b5cf6"; // 紫
 }
 
 function loadImage(file) {
@@ -244,7 +245,6 @@ function loadImage(file) {
       offCanvas.getContext('2d').drawImage(img, 0, 0);
 
       document.getElementById('canvasWrap').style.display = "block";
-      alert("圖片解析完成。\n\n請在圖片左側的「地層彩色柱」中央點擊一下，程式將沿著該直線進行全深度連續採樣。");
     };
     img.src = e.target.result;
   };
@@ -273,7 +273,7 @@ function pickAndAnalyze(e) {
   }
 
   if (endY - startY < 50) {
-    alert("掃描失敗：無法在該垂直線上找到連續的地層色彩。請確認點擊在彩色地層柱內部！");
+    alert("掃描失敗：請確認點擊在彩色地層柱內部！");
     return;
   }
 
@@ -371,34 +371,49 @@ function executeContinuousScan(scanX, topY, botY) {
   const container = document.getElementById('layersContainer');
   container.innerHTML = "";
   layers.forEach(lyr => {
-    const rho = 1.45;
+    let rho = 1.6;
+    if (lyr.vs < 80) rho = 1.45;
+    else if (lyr.vs >= 180 && lyr.vs < 300) rho = 1.9; 
+    else if (lyr.vs >= 300) rho = 2.2; 
+
     const gmax = (rho * 1000.0 * (lyr.vs ** 2)) / 1e6;
-    const su = 25.0 * Math.pow(lyr.vs / 100.0, 2.2);
-    
     const colorTag = getColorColor(lyr.vs);
+    
+    // 直接明確點出土壤或石頭種類
     let mat = "", diag = "", qa = "";
 
-    // 直接給予具體土質名稱，移除所有「過渡層」字眼
-    if (lyr.vs <= 55) {
-      mat = "極軟流泥 / 懸浮狀淤泥";
-      diag = "處於高含水飽和狀態，幾乎無骨架支撐力。"; 
-      qa = "< 20 kPa";
-    } else if (lyr.vs <= 75) {
-      mat = "軟弱飽和黏土 / 沉積淤泥";
-      diag = "具備微弱承載力，受壓易產生壓密沉陷。"; 
-      qa = "30 ~ 40 kPa";
-    } else if (lyr.vs <= 95) {
-      mat = "鬆散粉細砂 / 未壓實回填土";
-      diag = "土體呈現鬆散狀態，尚未建立穩固之顆粒咬合。"; 
-      qa = "40 ~ 60 kPa";
+    if (lyr.vs <= 50) {
+      mat = "極軟泥漿 / 流泥";
+      diag = "高含水量的爛泥，幾乎像液體一樣沒有任何支撐力。"; 
+      qa = "< 20 kPa (極低)";
+    } else if (lyr.vs <= 80) {
+      mat = "軟弱黏土 / 淤泥";
+      diag = "一般的軟泥土，稍微受壓就容易產生凹陷或沉陷。"; 
+      qa = "30 ~ 50 kPa";
     } else if (lyr.vs <= 120) {
-      mat = "中等緊密砂土 / 輕度固結黏土";
-      diag = "具備初步之骨架咬合剛度，可承受一般輕型載重。"; 
-      qa = "60 ~ 90 kPa";
+      mat = "鬆散砂土 / 粉細砂";
+      diag = "鬆散的沙子或一般表土，還沒有被壓實。"; 
+      qa = "50 ~ 80 kPa";
+    } else if (lyr.vs <= 180) {
+      mat = "中等緊密砂土 / 硬質黏土";
+      diag = "被壓實過的沙土或偏硬的黏土，承載表現算穩固。"; 
+      qa = "90 ~ 150 kPa";
+    } else if (lyr.vs <= 260) {
+      mat = "碎石 / 道碴 / 密實礫石";
+      diag = "主要由石頭組成的粗粒料層，顆粒互相卡得很緊（互鎖力強）。"; 
+      qa = "200 ~ 300 kPa";
+    } else if (lyr.vs <= 350) {
+      mat = "卵礫石 / 極緻密砂石";
+      diag = "大顆石頭與沙子緊密混合，非常堅硬，承載力極佳。"; 
+      qa = "300 ~ 500 kPa";
+    } else if (lyr.vs <= 500) {
+      mat = "風化軟岩 (如泥岩、頁岩)";
+      diag = "已經變成石頭的岩盤，但稍微偏軟或有明顯風化痕跡。"; 
+      qa = "500 ~ 800 kPa";
     } else {
-      mat = "緊密級配土 / 固結沉積底土";
-      diag = "受自重或外力壓密良好之穩定承載層。"; 
-      qa = "100 kPa +";
+      mat = "堅硬岩盤 (如砂岩、石灰岩)";
+      diag = "非常堅硬的純石頭/基岩層，剛性極高。"; 
+      qa = "> 1000 kPa (極高)";
     }
 
     container.innerHTML += `
@@ -410,10 +425,9 @@ function executeContinuousScan(scanX, topY, botY) {
         <div class="data-grid">
           <div class="data-box"><div class="data-label">平均波速 (Vs)</div><div class="data-val" style="color:${colorTag};">${lyr.vs} m/s</div></div>
           <div class="data-box"><div class="data-label">剪力模數 (Gmax)</div><div class="data-val">${gmax.toFixed(1)} MPa</div></div>
-          <div class="data-box"><div class="data-label">不排水強度 (Su)</div><div class="data-val">${su.toFixed(1)} kPa</div></div>
-          <div class="data-box"><div class="data-label">容許承載力估算</div><div class="data-val">${qa}</div></div>
+          <div class="data-box"><div class="data-label">容許承載力評估</div><div class="data-val">${qa}</div></div>
         </div>
-        <div style="font-size:0.85rem; color:#475569; margin-top:4px;"><b>土質狀態：</b>${diag}</div>
+        <div style="font-size:0.85rem; color:#475569; margin-top:4px;"><b>土質與岩體狀態：</b>${diag}</div>
       </div>
     `;
   });
