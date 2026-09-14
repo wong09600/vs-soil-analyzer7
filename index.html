@@ -138,7 +138,7 @@
 <div class="container">
   <header>
     <h1>GeoPlot 高清地質與岩土強度分析儀</h1>
-    <p>全頻寬材質鑑別：直接告訴你是爛泥、黏土、砂土、碎石還是岩石</p>
+    <p>中心蔓延鎖定演算：完美避開空白區格線干擾</p>
   </header>
 
   <div class="card">
@@ -147,7 +147,7 @@
     <div class="upload-box">
       <input type="file" accept="image/*" onchange="loadImage(this.files[0])">
       <div style="font-weight:700; color:#dc2626;">📷 點此上傳高清剖面圖</div>
-      <div style="font-size:0.75rem; color:#64748b;">上傳後，點擊彩色柱的中心，程式將自動貫穿解析</div>
+      <div style="font-size:0.75rem; color:#64748b;">上傳後，點擊彩色地層柱的中心，程式將以該點向上下蔓延解析</div>
     </div>
 
     <div class="canvas-wrap" id="canvasWrap" style="display:none;">
@@ -179,6 +179,7 @@ let img = new Image();
 let offCanvas = document.createElement('canvas');
 
 function getContinuousVs(r, g, b) {
+  // 排除背景白與深色黑線
   if ((r > 240 && g > 240 && b > 240) || (r < 40 && g < 40 && b < 40)) return null;
 
   let r_n = r / 255, g_n = g / 255, b_n = b / 255;
@@ -187,7 +188,7 @@ function getContinuousVs(r, g, b) {
   let s = max === 0 ? 0 : (max - min) / max;
   let l = (max + min) / 2;
   
-  if (s < 0.2 || l < 0.1 || l > 0.95) return null;
+  if (s < 0.15 || l < 0.1 || l > 0.95) return null;
 
   if (max !== min) {
     let d = max - min;
@@ -218,16 +219,16 @@ function getContinuousVs(r, g, b) {
 }
 
 function getColorColor(vs) {
-  if (vs < 50) return "#e100e1"; // 洋紅
-  if (vs < 75) return "#eb0000"; // 紅
-  if (vs < 90) return "#f55000"; // 橙紅
-  if (vs < 115) return "#fa8200"; // 橘
-  if (vs < 130) return "#ffb400"; // 橙黃
-  if (vs < 160) return "#ffe100"; // 黃
-  if (vs < 220) return "#a3e635"; // 淺綠
-  if (vs < 300) return "#22c55e"; // 綠
-  if (vs < 450) return "#3b82f6"; // 藍
-  return "#8b5cf6"; // 紫
+  if (vs < 50) return "#e100e1"; 
+  if (vs < 75) return "#eb0000"; 
+  if (vs < 90) return "#f55000"; 
+  if (vs < 115) return "#fa8200"; 
+  if (vs < 130) return "#ffb400"; 
+  if (vs < 160) return "#ffe100"; 
+  if (vs < 220) return "#a3e635"; 
+  if (vs < 300) return "#22c55e"; 
+  if (vs < 450) return "#3b82f6"; 
+  return "#8b5cf6"; 
 }
 
 function loadImage(file) {
@@ -262,17 +263,34 @@ function pickAndAnalyze(e) {
   const ctx = offCanvas.getContext('2d');
   const h = offCanvas.height;
 
-  let startY = 0, endY = h - 1;
-  for (let y = 0; y < h; y++) {
+  // 核心修改：以點擊位置為中心，向上下「蔓延」尋找邊界，杜絕碰觸上方無效藍線
+  let startY = clickY;
+  let nullCount = 0;
+  for (let y = clickY; y >= 0; y--) {
     let p = ctx.getImageData(clickX, y, 1, 1).data;
-    if (getContinuousVs(p[0], p[1], p[2]) !== null) { startY = y; break; }
-  }
-  for (let y = h - 1; y >= startY; y--) {
-    let p = ctx.getImageData(clickX, y, 1, 1).data;
-    if (getContinuousVs(p[0], p[1], p[2]) !== null) { endY = y; break; }
+    if (getContinuousVs(p[0], p[1], p[2]) === null) {
+      nullCount++;
+      if (nullCount > 5) break; // 連續 5 個空白像素即判定到達地表
+    } else {
+      startY = y; 
+      nullCount = 0;
+    }
   }
 
-  if (endY - startY < 50) {
+  let endY = clickY;
+  nullCount = 0;
+  for (let y = clickY; y < h; y++) {
+    let p = ctx.getImageData(clickX, y, 1, 1).data;
+    if (getContinuousVs(p[0], p[1], p[2]) === null) {
+      nullCount++;
+      if (nullCount > 5) break; // 連續 5 個空白像素即判定到達底部
+    } else {
+      endY = y;
+      nullCount = 0;
+    }
+  }
+
+  if (endY - startY < 30) {
     alert("掃描失敗：請確認點擊在彩色地層柱內部！");
     return;
   }
@@ -379,7 +397,6 @@ function executeContinuousScan(scanX, topY, botY) {
     const gmax = (rho * 1000.0 * (lyr.vs ** 2)) / 1e6;
     const colorTag = getColorColor(lyr.vs);
     
-    // 直接明確點出土壤或石頭種類
     let mat = "", diag = "", qa = "";
 
     if (lyr.vs <= 50) {
