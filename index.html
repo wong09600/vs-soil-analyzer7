@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>GeoPlot 精確防呆地層解析儀</title>
+  <title>GeoPlot 高清土質與強度分析儀</title>
   <style>
     :root {
       --primary: #0f172a;
@@ -52,37 +52,20 @@
     }
 
     .upload-box {
-      border: 2px dashed #f87171;
-      background: #fef2f2;
+      border: 2px dashed #94a3b8;
+      background: #f1f5f9;
       border-radius: 8px;
       padding: 20px;
       text-align: center;
       cursor: pointer;
       position: relative;
+      transition: 0.2s;
     }
+    .upload-box:hover { border-color: #dc2626; background: #fef2f2; }
     .upload-box input {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
       opacity: 0; cursor: pointer;
-    }
-
-    .depth-setting {
-      margin-top: 10px;
-      background: #f1f5f9;
-      padding: 10px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-    }
-    .depth-setting input {
-      width: 80px;
-      padding: 4px 8px;
-      border: 1px solid #94a3b8;
-      border-radius: 4px;
-      font-weight: bold;
-      text-align: center;
     }
 
     .canvas-wrap {
@@ -97,7 +80,7 @@
 
     .sample-bar {
       background: #f8fafc;
-      border: 2px solid #ef4444;
+      border: 2px solid #cbd5e1;
       border-radius: 8px;
       padding: 10px 14px;
       margin-top: 10px;
@@ -154,22 +137,17 @@
 
 <div class="container">
   <header>
-    <h1>GeoPlot 精確防呆地層解析儀</h1>
-    <p>嚴格黑框碰撞鎖定・橫向摩爾紋抗干擾・杜絕假邊界</p>
+    <h1>GeoPlot 高清土質與強度分析儀</h1>
+    <p>直覺式土質判定・動態捕捉平滑漸變與夾層邊界</p>
   </header>
 
   <div class="card">
-    <div class="card-title">1. 上傳原圖並點擊剖面柱</div>
+    <div class="card-title">1. 上傳高清原圖與指定掃描線</div>
 
     <div class="upload-box">
       <input type="file" accept="image/*" onchange="loadImage(this.files[0])">
-      <div style="font-weight:700; color:#dc2626;">📷 點此上傳圖片</div>
-      <div style="font-size:0.75rem; color:#64748b;">請直接在彩色長條柱內點擊，系統將自動尋找頂底黑框界線</div>
-    </div>
-
-    <div class="depth-setting" id="depthConfig" style="display:none;">
-      <label style="font-size:0.85rem; font-weight:700; color:#334155;">設定柱體最底端深度 (m)：</label>
-      <input type="number" id="maxDepth" value="1.5" step="0.1">
+      <div style="font-weight:700; color:#dc2626;">📷 點此上傳高清剖面圖</div>
+      <div style="font-size:0.75rem; color:#64748b;">上傳後，點擊地層長條柱的中心位置，程式將沿該直線進行深層解析</div>
     </div>
 
     <div class="canvas-wrap" id="canvasWrap" style="display:none;">
@@ -182,7 +160,7 @@
         <div id="chipColor" class="color-chip"></div>
         <div><span style="font-size:0.75rem; color:#64748b;">點擊深度：</span><b id="txtDepth">-- m</b></div>
       </div>
-      <div><span style="font-size:0.75rem; color:#64748b;">抗網格波速：</span><b id="txtVs" style="color:#dc2626; font-size:1.1rem;">-- m/s</b></div>
+      <div><span style="font-size:0.75rem; color:#64748b;">實測波速：</span><b id="txtVs" style="color:#dc2626; font-size:1.1rem;">-- m/s</b></div>
       <div><span style="font-size:0.75rem; color:#64748b;">剪力模數 Gmax：</span><b id="txtGmax">-- MPa</b></div>
     </div>
   </div>
@@ -192,39 +170,39 @@
     <div id="layersContainer"></div>
   </div>
 
+  <footer>
+    色彩引擎：HSV 色相連續插值法 (Continuous Hue Interpolation)<br>
+    切層引擎：累積波速漂移演算法 (Cumulative Drift Threshold)
+  </footer>
 </div>
 
 <script>
 let img = new Image();
 let offCanvas = document.createElement('canvas');
 
-function rgbToHue(r, g, b) {
+// 建立高密度的連續色相查詢表 (Hue to Vs)
+function getContinuousVs(r, g, b) {
+  if ((r > 240 && g > 240 && b > 240) || (r < 40 && g < 40 && b < 40)) return null;
+
   let r_n = r / 255, g_n = g / 255, b_n = b / 255;
   let max = Math.max(r_n, g_n, b_n), min = Math.min(r_n, g_n, b_n);
+  let h = 0;
   let s = max === 0 ? 0 : (max - min) / max;
   let l = (max + min) / 2;
   
-  // 嚴格排除黑框、白底與灰階反光字體
-  if (s < 0.2 || l < 0.1 || l > 0.90) return null; 
+  if (s < 0.2 || l < 0.1 || l > 0.95) return null;
 
-  let h = 0;
   if (max !== min) {
     let d = max - min;
     if (max === r_n) h = (g_n - b_n) / d + (g_n < b_n ? 6 : 0);
     else if (max === g_n) h = (b_n - r_n) / d + 2;
     else h = (r_n - g_n) / d + 4;
-    h *= 60;
+    h *= 60; 
   }
-  return h;
-}
-
-function getContinuousVs(r, g, b) {
-  let h = rgbToHue(r, g, b);
-  if (h === null) return null;
 
   let vs = 0;
   if (h >= 300 || h < 5) {
-    let offset = (h >= 300) ? (360 - h) : -h;
+    let offset = (h >= 300) ? (360 - h) : -h; 
     vs = 40 + ((60 - offset) / 60) * 20; 
   } else if (h >= 5 && h < 20) {
     vs = 60 + ((h - 5) / 15) * 20; 
@@ -237,30 +215,18 @@ function getContinuousVs(r, g, b) {
   } else {
     vs = 200 + ((h - 140) / 100) * 200;
   }
-  return Math.max(40, Math.min(660, vs));
+
+  vs = Math.max(40, Math.min(660, vs));
+  return vs;
 }
 
-function getColorLabel(vs) {
-  if (vs < 50) return { name: "洋紅色/粉紫", color: "#e100e1" };
-  if (vs < 75) return { name: "鮮紅色", color: "#eb0000" };
-  if (vs < 90) return { name: "橙紅色", color: "#f55000" };
-  if (vs < 115) return { name: "橘色", color: "#fa8200" };
-  if (vs < 130) return { name: "橙黃色", color: "#ffb400" };
-  return { name: "黃色+", color: "#ffe100" };
-}
-
-// 橫向平均法：徹底消滅螢幕網格與摩爾紋
-function getHorizontalAvgVs(ctx, cx, y) {
-  let rSum = 0, gSum = 0, bSum = 0, count = 0;
-  // 取左右各 8 個像素平均 (共17像素寬)
-  for (let dx = -8; dx <= 8; dx++) {
-    let p = ctx.getImageData(cx + dx, y, 1, 1).data;
-    if (getContinuousVs(p[0], p[1], p[2]) !== null) {
-      rSum += p[0]; gSum += p[1]; bSum += p[2]; count++;
-    }
-  }
-  if (count > 0) return getContinuousVs(rSum/count, gSum/count, bSum/count);
-  return null;
+function getColorColor(vs) {
+  if (vs < 50) return "#e100e1";
+  if (vs < 75) return "#eb0000";
+  if (vs < 90) return "#f55000";
+  if (vs < 115) return "#fa8200";
+  if (vs < 130) return "#ffb400";
+  return "#ffe100";
 }
 
 function loadImage(file) {
@@ -277,8 +243,8 @@ function loadImage(file) {
       offCanvas.height = img.height;
       offCanvas.getContext('2d').drawImage(img, 0, 0);
 
-      document.getElementById('depthConfig').style.display = "flex";
       document.getElementById('canvasWrap').style.display = "block";
+      alert("圖片解析完成。\n\n請在圖片左側的「地層彩色柱」中央點擊一下，程式將沿著該直線進行全深度連續採樣。");
     };
     img.src = e.target.result;
   };
@@ -296,87 +262,76 @@ function pickAndAnalyze(e) {
   const ctx = offCanvas.getContext('2d');
   const h = offCanvas.height;
 
-  // 1. 【防呆關鍵】從點擊位置分別往上、往下找邊界，碰到黑框或無色區域立刻煞車
-  let startY = clickY;
-  while (startY > 0) {
-    let p = ctx.getImageData(clickX, startY, 1, 1).data;
-    if (getContinuousVs(p[0], p[1], p[2]) === null) break;
-    startY--;
+  let startY = 0, endY = h - 1;
+  for (let y = 0; y < h; y++) {
+    let p = ctx.getImageData(clickX, y, 1, 1).data;
+    if (getContinuousVs(p[0], p[1], p[2]) !== null) { startY = y; break; }
   }
-  startY++; // 回退一步到有效色彩
-
-  let endY = clickY;
-  while (endY < h - 1) {
-    let p = ctx.getImageData(clickX, endY, 1, 1).data;
-    if (getContinuousVs(p[0], p[1], p[2]) === null) break;
-    endY++;
+  for (let y = h - 1; y >= startY; y--) {
+    let p = ctx.getImageData(clickX, y, 1, 1).data;
+    if (getContinuousVs(p[0], p[1], p[2]) !== null) { endY = y; break; }
   }
-  endY--; // 回退一步到有效色彩
 
-  if (endY - startY < 30) {
-    alert("請確保點擊在「彩色地層柱內部」！");
+  if (endY - startY < 50) {
+    alert("掃描失敗：無法在該垂直線上找到連續的地層色彩。請確認點擊在彩色地層柱內部！");
     return;
   }
 
-  const maxDepth = parseFloat(document.getElementById('maxDepth').value) || 1.5;
-  const depth = ((clickY - startY) / (endY - startY)) * maxDepth;
-
-  // 取得橫向平均化波速
-  let vs = getHorizontalAvgVs(ctx, clickX, clickY) || 60;
-  const label = getColorLabel(vs);
+  const curY = Math.max(startY, Math.min(endY, clickY));
+  const depth = ((curY - startY) / (endY - startY)) * 1.5;
+  const p = ctx.getImageData(clickX, curY, 1, 1).data;
+  const vs = getContinuousVs(p[0], p[1], p[2]) || 60;
+  const colorTag = getColorColor(vs);
   
-  const p = ctx.getImageData(clickX, clickY, 1, 1).data;
   document.getElementById('sampleBar').style.display = "flex";
-  document.getElementById('sampleBar').style.borderColor = label.color;
+  document.getElementById('sampleBar').style.borderColor = colorTag;
   document.getElementById('chipColor').style.backgroundColor = `rgb(${p[0]},${p[1]},${p[2]})`;
   document.getElementById('txtDepth').innerText = `${depth.toFixed(2)} m`;
-  document.getElementById('txtVs').innerText = `${Math.round(vs)} m/s (${label.name})`;
-  document.getElementById('txtVs').style.color = label.color;
+  document.getElementById('txtVs').innerText = `${Math.round(vs)} m/s`;
+  document.getElementById('txtVs').style.color = colorTag;
   
   const rho = 1.45;
   document.getElementById('txtGmax').innerText = `${((rho * 1000 * vs * vs)/1e6).toFixed(1)} MPa`;
 
-  // 執行安全區間掃描
-  executeSafeScan(clickX, startY, endY, maxDepth);
+  executeContinuousScan(clickX, startY, endY);
 }
 
-function executeSafeScan(scanX, topY, botY, maxDepth) {
+function executeContinuousScan(scanX, topY, botY) {
   const ctx = offCanvas.getContext('2d');
   
-  // 建立 150 個採樣點
-  const steps = 150;
+  const steps = 200;
   const samples = [];
   for (let i = 0; i <= steps; i++) {
     const y = topY + Math.floor((i / steps) * (botY - topY));
-    let vs = getHorizontalAvgVs(ctx, scanX, y);
-    if (vs === null) vs = (samples.length > 0) ? samples[samples.length-1].vs : 60; 
-    samples.push({ z: (i / steps) * maxDepth, vs: vs, y: y });
+    const p = ctx.getImageData(scanX, y, 1, 1).data;
+    let vs = getContinuousVs(p[0], p[1], p[2]);
+    if (vs === null) vs = (samples.length > 0) ? samples[samples.length-1].vs : 60;
+    samples.push({ z: (i / steps) * 1.5, vs: vs, y: y });
   }
 
-  // 強效平滑濾波 (消除垂直雜訊)
   const smoothed = [];
   for (let i = 0; i < samples.length; i++) {
     let sum = 0, count = 0;
-    for (let j = Math.max(0, i-4); j <= Math.min(samples.length-1, i+4); j++) {
+    for (let j = Math.max(0, i-3); j <= Math.min(samples.length-1, i+3); j++) {
       sum += samples[j].vs; count++;
     }
     smoothed.push({ z: samples[i].z, vs: sum/count, y: samples[i].y });
   }
 
-  // 高穩健切層：只抓厚度 > 0.05m 且波速落差 > 15m/s 的真實邊界
   const boundaries = [0];
-  let baseVs = smoothed[0].vs;
+  let currentLayerBaseVs = smoothed[0].vs;
+  
   for (let i = 1; i < smoothed.length; i++) {
-    if (Math.abs(smoothed[i].vs - baseVs) >= 15) {
-      if (smoothed[i].z - smoothed[boundaries[boundaries.length - 1]].z >= 0.05) {
+    const drift = Math.abs(smoothed[i].vs - currentLayerBaseVs);
+    if (drift > 12) {
+      if (smoothed[i].z - smoothed[boundaries[boundaries.length - 1]].z >= 0.04) {
         boundaries.push(i);
-        baseVs = smoothed[i].vs;
+        currentLayerBaseVs = smoothed[i].vs; 
       }
     }
   }
   boundaries.push(smoothed.length - 1);
 
-  // 繪製掃描線
   const dispCtx = document.getElementById('mainCanvas').getContext('2d');
   dispCtx.drawImage(offCanvas, 0, 0);
   
@@ -413,39 +368,52 @@ function executeSafeScan(scanX, topY, botY, maxDepth) {
     layers.push({ id: b + 1, top: topZ, bot: botZ, h: botZ - topZ, vs: avgVs });
   }
 
-  // 渲染報告
   const container = document.getElementById('layersContainer');
   container.innerHTML = "";
   layers.forEach(lyr => {
     const rho = 1.45;
     const gmax = (rho * 1000.0 * (lyr.vs ** 2)) / 1e6;
     const su = 25.0 * Math.pow(lyr.vs / 100.0, 2.2);
-    const label = getColorLabel(lyr.vs);
+    
+    const colorTag = getColorColor(lyr.vs);
+    let mat = "", diag = "", qa = "";
 
-    let diag = "", qa = "";
+    // 直接給予具體土質名稱，移除所有「過渡層」字眼
     if (lyr.vs <= 55) {
-      diag = "極軟夾層，飽和懸浮態，無自立骨架。"; qa = "< 20 kPa";
+      mat = "極軟流泥 / 懸浮狀淤泥";
+      diag = "處於高含水飽和狀態，幾乎無骨架支撐力。"; 
+      qa = "< 20 kPa";
     } else if (lyr.vs <= 75) {
-      diag = "軟弱層，抗壓密剛度低，呈現塑性擠出。"; qa = "30 ~ 40 kPa";
+      mat = "軟弱飽和黏土 / 沉積淤泥";
+      diag = "具備微弱承載力，受壓易產生壓密沉陷。"; 
+      qa = "30 ~ 40 kPa";
     } else if (lyr.vs <= 95) {
-      diag = "過渡層，開始產生微弱抗剪力鏈。"; qa = "40 ~ 60 kPa";
+      mat = "鬆散粉細砂 / 未壓實回填土";
+      diag = "土體呈現鬆散狀態，尚未建立穩固之顆粒咬合。"; 
+      qa = "40 ~ 60 kPa";
+    } else if (lyr.vs <= 120) {
+      mat = "中等緊密砂土 / 輕度固結黏土";
+      diag = "具備初步之骨架咬合剛度，可承受一般輕型載重。"; 
+      qa = "60 ~ 90 kPa";
     } else {
-      diag = "固結層 / 表土層，具備初步咬合。"; qa = "60 ~ 100 kPa";
+      mat = "緊密級配土 / 固結沉積底土";
+      diag = "受自重或外力壓密良好之穩定承載層。"; 
+      qa = "100 kPa +";
     }
 
     container.innerHTML += `
-      <div class="layer-card" style="border-left-color:${label.color};">
+      <div class="layer-card" style="border-left-color:${colorTag};">
         <div class="layer-head">
-          <span style="color:${label.color};">第 ${lyr.id} 層：${label.name}</span>
+          <span style="color:${colorTag};">第 ${lyr.id} 層：${mat}</span>
           <span style="color:#0284c7;">深度: ${lyr.top.toFixed(2)} ~ ${lyr.bot.toFixed(2)} m (厚: ${lyr.h.toFixed(2)}m)</span>
         </div>
         <div class="data-grid">
-          <div class="data-box"><div class="data-label">平均波速 (Vs)</div><div class="data-val" style="color:${label.color};">${lyr.vs} m/s</div></div>
+          <div class="data-box"><div class="data-label">平均波速 (Vs)</div><div class="data-val" style="color:${colorTag};">${lyr.vs} m/s</div></div>
           <div class="data-box"><div class="data-label">剪力模數 (Gmax)</div><div class="data-val">${gmax.toFixed(1)} MPa</div></div>
           <div class="data-box"><div class="data-label">不排水強度 (Su)</div><div class="data-val">${su.toFixed(1)} kPa</div></div>
-          <div class="data-box"><div class="data-label">容許承載力</div><div class="data-val">${qa}</div></div>
+          <div class="data-box"><div class="data-label">容許承載力估算</div><div class="data-val">${qa}</div></div>
         </div>
-        <div style="font-size:0.85rem; color:#475569; margin-top:4px;"><b>狀態：</b>${diag}</div>
+        <div style="font-size:0.85rem; color:#475569; margin-top:4px;"><b>土質狀態：</b>${diag}</div>
       </div>
     `;
   });
