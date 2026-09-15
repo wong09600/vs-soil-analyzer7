@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>GeoPlot 全頻寬地質與材質解析儀</title>
+  <title>GeoPlot 動態記憶與精準材質解析儀</title>
   <style>
     :root {
       --primary: #0f172a;
@@ -49,6 +49,9 @@
       margin-bottom: 10px;
       border-bottom: 2px solid #f1f5f9;
       padding-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
 
     .upload-box {
@@ -68,6 +71,27 @@
       opacity: 0; cursor: pointer;
     }
 
+    /* 動態參數面板 */
+    .settings-panel {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 10px;
+    }
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .setting-row:last-child { margin-bottom: 0; }
+    .setting-label { font-size: 0.85rem; font-weight: 600; color: #334155; }
+    .setting-desc { font-size: 0.7rem; color: #64748b; display: block; }
+    .setting-control { display: flex; align-items: center; gap: 8px; width: 50%; }
+    .setting-control input[type=range] { width: 100%; }
+    .setting-val { font-size: 0.85rem; font-weight: 800; color: #dc2626; min-width: 30px; text-align: right; }
+
     .canvas-wrap {
       margin-top: 10px;
       text-align: center;
@@ -79,7 +103,7 @@
     canvas { max-width: 100%; height: auto; border-radius: 4px; }
 
     .sample-bar {
-      background: #f8fafc;
+      background: #ffffff;
       border: 2px solid #cbd5e1;
       border-radius: 8px;
       padding: 10px 14px;
@@ -140,6 +164,9 @@
       color: #1e3a8a;
     }
 
+    ul.mat-list { margin: 4px 0 0 0; padding-left: 20px; }
+    ul.mat-list li { margin-bottom: 2px; }
+
     footer { text-align: center; font-size: 0.72rem; color: var(--sub); padding: 12px; }
   </style>
 </head>
@@ -147,17 +174,43 @@
 
 <div class="container">
   <header>
-    <h1>GeoPlot 萬物地質與材質解析儀</h1>
-    <p>全頻寬鑑別：包含土加水、液化砂土、卵礫石至各種岩盤與金屬邊界</p>
+    <h1>GeoPlot 動態記憶與材質解析儀</h1>
+    <p>具備個人化參數記憶・自適應各種翻拍雜訊與極端圖層</p>
   </header>
 
   <div class="card">
-    <div class="card-title">1. 上傳剖面圖與指定掃描線</div>
+    <div class="card-title">
+      <span>1. 影像輸入與學習參數微調</span>
+      <span style="font-size:0.75rem; color:#64748b; background:#e2e8f0; padding:2px 6px; border-radius:4px;">自動記憶上次設定</span>
+    </div>
 
-    <div class="upload-box">
+    <div class="settings-panel">
+      <div class="setting-row">
+        <div>
+          <span class="setting-label">切層敏感度 (Drift Threshold)</span>
+          <span class="setting-desc">波速變化多少 m/s 才切分新地層？數值越小越敏感。</span>
+        </div>
+        <div class="setting-control">
+          <input type="range" id="driftRange" min="4" max="25" value="10" oninput="updateSettings()">
+          <span class="setting-val" id="driftVal">10</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div>
+          <span class="setting-label">平滑濾波強度 (Smoothing)</span>
+          <span class="setting-desc">消除螢幕反光或漸層雜訊。若發現假邊界，請調高此數值。</span>
+        </div>
+        <div class="setting-control">
+          <input type="range" id="smoothRange" min="0" max="5" value="1" oninput="updateSettings()">
+          <span class="setting-val" id="smoothVal">1</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="upload-box" style="margin-top:10px;">
       <input type="file" accept="image/*" onchange="loadImage(this.files[0])">
       <div style="font-weight:700; color:#dc2626;">📷 點此上傳高清剖面圖</div>
-      <div style="font-size:0.75rem; color:#64748b;">上傳後，點擊彩色地層柱的中心，程式將以該點向上下蔓延解析</div>
+      <div style="font-size:0.75rem; color:#64748b;">上傳後點擊彩色地層柱，可隨時拉動上方拉桿即時更新報表</div>
     </div>
 
     <div class="canvas-wrap" id="canvasWrap" style="display:none;">
@@ -175,27 +228,54 @@
   </div>
 
   <div class="card" id="outCard" style="display:none;">
-    <div class="card-title">2. 全深度動態切層與地質可能性報告</div>
+    <div class="card-title">2. 全深度動態切層與具體材質報告</div>
     <div id="layersContainer"></div>
   </div>
 
   <footer>
-    色彩引擎：HSV 連續插值法 (支援 40 m/s ~ 660+ m/s 全範圍)
+    使用瀏覽器快取儲存參數，實現偽 AI 自我學習微調。
   </footer>
 </div>
 
 <script>
 let img = new Image();
 let offCanvas = document.createElement('canvas');
+let lastClickX = 0, lastClickY = 0; // 記住上次點擊座標以供拉桿即時更新
 
+// 初始化讀取 LocalStorage 快取記憶
+window.onload = function() {
+  if (localStorage.getItem('geoDrift')) {
+    document.getElementById('driftRange').value = localStorage.getItem('geoDrift');
+  }
+  if (localStorage.getItem('geoSmooth')) {
+    document.getElementById('smoothRange').value = localStorage.getItem('geoSmooth');
+  }
+  updateLabels();
+};
+
+function updateLabels() {
+  document.getElementById('driftVal').innerText = document.getElementById('driftRange').value;
+  document.getElementById('smoothVal').innerText = document.getElementById('smoothRange').value;
+}
+
+// 拉桿拖動時即時更新並儲存參數
+function updateSettings() {
+  updateLabels();
+  localStorage.setItem('geoDrift', document.getElementById('driftRange').value);
+  localStorage.setItem('geoSmooth', document.getElementById('smoothRange').value);
+  
+  // 如果圖片已經點擊過了，直接重新執行分析
+  if (document.getElementById('canvasWrap').style.display === 'block' && lastClickX > 0) {
+    executeAnalysis(lastClickX, lastClickY);
+  }
+}
+
+// HSV 色相連續插值法
 function getContinuousVs(r, g, b) {
   if ((r > 240 && g > 240 && b > 240) || (r < 40 && g < 40 && b < 40)) return null;
-
   let r_n = r / 255, g_n = g / 255, b_n = b / 255;
   let max = Math.max(r_n, g_n, b_n), min = Math.min(r_n, g_n, b_n);
-  let h = 0;
-  let s = max === 0 ? 0 : (max - min) / max;
-  let l = (max + min) / 2;
+  let h = 0, s = max === 0 ? 0 : (max - min) / max, l = (max + min) / 2;
   
   if (s < 0.15 || l < 0.1 || l > 0.95) return null;
 
@@ -208,23 +288,14 @@ function getContinuousVs(r, g, b) {
   }
 
   let vs = 0;
-  if (h >= 300 || h < 5) {
-    let offset = (h >= 300) ? (360 - h) : -h; 
-    vs = 40 + ((60 - offset) / 60) * 20; 
-  } else if (h >= 5 && h < 20) {
-    vs = 60 + ((h - 5) / 15) * 20; 
-  } else if (h >= 20 && h < 40) {
-    vs = 80 + ((h - 20) / 20) * 25; 
-  } else if (h >= 40 && h < 70) {
-    vs = 105 + ((h - 40) / 30) * 35; 
-  } else if (h >= 70 && h < 140) {
-    vs = 140 + ((h - 70) / 70) * 60; 
-  } else {
-    vs = 200 + ((h - 140) / 100) * 200;
-  }
+  if (h >= 300 || h < 5) vs = 40 + ((60 - ((h >= 300) ? (360 - h) : -h)) / 60) * 20; 
+  else if (h >= 5 && h < 20) vs = 60 + ((h - 5) / 15) * 20; 
+  else if (h >= 20 && h < 40) vs = 80 + ((h - 20) / 20) * 25; 
+  else if (h >= 40 && h < 70) vs = 105 + ((h - 40) / 30) * 35; 
+  else if (h >= 70 && h < 140) vs = 140 + ((h - 70) / 70) * 60; 
+  else vs = 200 + ((h - 140) / 100) * 200;
 
-  vs = Math.max(40, Math.min(660, vs));
-  return vs;
+  return Math.max(40, Math.min(660, vs));
 }
 
 function getColorColor(vs) {
@@ -246,14 +317,10 @@ function loadImage(file) {
   reader.onload = function(e) {
     img.onload = function() {
       const c = document.getElementById('mainCanvas');
-      c.width = img.width;
-      c.height = img.height;
+      c.width = img.width; c.height = img.height;
       c.getContext('2d').drawImage(img, 0, 0);
-
-      offCanvas.width = img.width;
-      offCanvas.height = img.height;
+      offCanvas.width = img.width; offCanvas.height = img.height;
       offCanvas.getContext('2d').drawImage(img, 0, 0);
-
       document.getElementById('canvasWrap').style.display = "block";
     };
     img.src = e.target.result;
@@ -264,43 +331,33 @@ function loadImage(file) {
 function pickAndAnalyze(e) {
   const cvs = document.getElementById('mainCanvas');
   const rect = cvs.getBoundingClientRect();
-  const scaleX = cvs.width / rect.width;
-  const scaleY = cvs.height / rect.height;
+  lastClickX = Math.floor((e.clientX - rect.left) * (cvs.width / rect.width));
+  lastClickY = Math.floor((e.clientY - rect.top) * (cvs.height / rect.height));
+  executeAnalysis(lastClickX, lastClickY);
+}
 
-  const clickX = Math.floor((e.clientX - rect.left) * scaleX);
-  const clickY = Math.floor((e.clientY - rect.top) * scaleY);
+function executeAnalysis(clickX, clickY) {
   const ctx = offCanvas.getContext('2d');
   const h = offCanvas.height;
 
-  let startY = clickY;
-  let nullCount = 0;
+  let startY = clickY, nullCount = 0;
   for (let y = clickY; y >= 0; y--) {
     let p = ctx.getImageData(clickX, y, 1, 1).data;
     if (getContinuousVs(p[0], p[1], p[2]) === null) {
-      nullCount++;
-      if (nullCount > 5) break; 
-    } else {
-      startY = y; 
-      nullCount = 0;
-    }
+      if (++nullCount > 5) break; 
+    } else { startY = y; nullCount = 0; }
   }
 
-  let endY = clickY;
-  nullCount = 0;
+  let endY = clickY; nullCount = 0;
   for (let y = clickY; y < h; y++) {
     let p = ctx.getImageData(clickX, y, 1, 1).data;
     if (getContinuousVs(p[0], p[1], p[2]) === null) {
-      nullCount++;
-      if (nullCount > 5) break; 
-    } else {
-      endY = y;
-      nullCount = 0;
-    }
+      if (++nullCount > 5) break; 
+    } else { endY = y; nullCount = 0; }
   }
 
   if (endY - startY < 30) {
-    alert("掃描失敗：請確認點擊在彩色地層柱內部！");
-    return;
+    alert("掃描失敗：請確認點擊在彩色地層柱內部！"); return;
   }
 
   const curY = Math.max(startY, Math.min(endY, clickY));
@@ -315,17 +372,17 @@ function pickAndAnalyze(e) {
   document.getElementById('txtDepth').innerText = `${depth.toFixed(2)} m`;
   document.getElementById('txtVs').innerText = `${Math.round(vs)} m/s`;
   document.getElementById('txtVs').style.color = colorTag;
-  
-  const rho = 1.45;
-  document.getElementById('txtGmax').innerText = `${((rho * 1000 * vs * vs)/1e6).toFixed(1)} MPa`;
+  document.getElementById('txtGmax').innerText = `${((1.45 * 1000 * vs * vs)/1e6).toFixed(1)} MPa`;
 
   executeContinuousScan(clickX, startY, endY);
 }
 
 function executeContinuousScan(scanX, topY, botY) {
   const ctx = offCanvas.getContext('2d');
+  const driftThresh = parseFloat(document.getElementById('driftRange').value);
+  const smoothLvl = parseInt(document.getElementById('smoothRange').value);
   
-  const steps = 200;
+  const steps = 300;
   const samples = [];
   for (let i = 0; i <= steps; i++) {
     const y = topY + Math.floor((i / steps) * (botY - topY));
@@ -338,7 +395,7 @@ function executeContinuousScan(scanX, topY, botY) {
   const smoothed = [];
   for (let i = 0; i < samples.length; i++) {
     let sum = 0, count = 0;
-    for (let j = Math.max(0, i-3); j <= Math.min(samples.length-1, i+3); j++) {
+    for (let j = Math.max(0, i - smoothLvl); j <= Math.min(samples.length-1, i + smoothLvl); j++) {
       sum += samples[j].vs; count++;
     }
     smoothed.push({ z: samples[i].z, vs: sum/count, y: samples[i].y });
@@ -348,9 +405,12 @@ function executeContinuousScan(scanX, topY, botY) {
   let currentLayerBaseVs = smoothed[0].vs;
   
   for (let i = 1; i < smoothed.length; i++) {
-    const drift = Math.abs(smoothed[i].vs - currentLayerBaseVs);
-    if (drift > 12) {
-      if (smoothed[i].z - smoothed[boundaries[boundaries.length - 1]].z >= 0.04) {
+    if (Math.abs(smoothed[i].vs - currentLayerBaseVs) > driftThresh) {
+      let persists = true;
+      for (let j = i; j < Math.min(i + 5, smoothed.length); j++) {
+         if (Math.abs(smoothed[j].vs - smoothed[i].vs) > driftThresh) { persists = false; break; }
+      }
+      if (persists && (smoothed[i].z - smoothed[boundaries[boundaries.length - 1]].z >= 0.03)) {
         boundaries.push(i);
         currentLayerBaseVs = smoothed[i].vs; 
       }
@@ -360,35 +420,25 @@ function executeContinuousScan(scanX, topY, botY) {
 
   const dispCtx = document.getElementById('mainCanvas').getContext('2d');
   dispCtx.drawImage(offCanvas, 0, 0);
-  
   dispCtx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-  dispCtx.lineWidth = 2;
-  dispCtx.setLineDash([4, 4]);
-  dispCtx.beginPath();
-  dispCtx.moveTo(scanX, topY);
-  dispCtx.lineTo(scanX, botY);
-  dispCtx.stroke();
-  dispCtx.setLineDash([]);
+  dispCtx.lineWidth = 2; dispCtx.setLineDash([4, 4]);
+  dispCtx.beginPath(); dispCtx.moveTo(scanX, topY); dispCtx.lineTo(scanX, botY);
+  dispCtx.stroke(); dispCtx.setLineDash([]);
 
   let layers = [];
   for (let b = 0; b < boundaries.length - 1; b++) {
     const s = boundaries[b], e = boundaries[b + 1];
     const topZ = smoothed[s].z, botZ = smoothed[e].z;
-    
     let sumVs = 0;
     for (let k = s; k <= e; k++) sumVs += smoothed[k].vs;
     const avgVs = Math.round(sumVs / (e - s + 1));
 
     if (b > 0) {
       const splitY = smoothed[s].y;
-      dispCtx.strokeStyle = "#ffff00";
-      dispCtx.lineWidth = 3;
-      dispCtx.beginPath();
-      dispCtx.moveTo(scanX - 35, splitY);
-      dispCtx.lineTo(scanX + 35, splitY);
+      dispCtx.strokeStyle = "#ffff00"; dispCtx.lineWidth = 3;
+      dispCtx.beginPath(); dispCtx.moveTo(scanX - 35, splitY); dispCtx.lineTo(scanX + 35, splitY);
       dispCtx.stroke();
-      dispCtx.fillStyle = "#ffff00";
-      dispCtx.font = "bold 15px sans-serif";
+      dispCtx.fillStyle = "#ffff00"; dispCtx.font = "bold 15px sans-serif";
       dispCtx.fillText(`分界 ${topZ.toFixed(2)}m`, scanX + 45, splitY + 5);
     }
     layers.push({ id: b + 1, top: topZ, bot: botZ, h: botZ - topZ, vs: avgVs });
@@ -404,66 +454,53 @@ function executeContinuousScan(scanX, topY, botY) {
 
     const gmax = (rho * 1000.0 * (lyr.vs ** 2)) / 1e6;
     const colorTag = getColorColor(lyr.vs);
-    
-    let mat = "", diag = "", qa = "";
+    let qa = "", optionsHTML = "";
 
-    // 涵蓋全範圍的材質與岩石判定
     if (lyr.vs <= 50) {
-      mat = "極軟流泥 / 懸浮狀泥漿 (土加水狀態)";
-      diag = "完全飽和且無有效應力，呈現液態或泥漿狀，極度軟爛。若在土槽中可能為底層泡水流泥。"; 
-      qa = "< 20 kPa (無法承載)";
-    } else if (lyr.vs <= 80) {
-      mat = "軟弱飽和黏土 / 鬆散淤泥";
-      diag = "高含水量之軟弱土層；若為砂土層則具備極高液化潛能。受壓易產生明顯沉陷。"; 
+      qa = "< 20 kPa (極低)";
+      optionsHTML = `<ul class="mat-list"><li><b>土加水 (流泥)</b>：完全飽和的泥漿，無互鎖力。</li><li><b>極軟弱淤泥</b>：未壓密的沉積軟泥。</li></ul>`;
+    } else if (lyr.vs <= 85) {
       qa = "20 ~ 50 kPa";
-    } else if (lyr.vs <= 120) {
-      mat = "鬆散粉細砂 / 紅土 / 一般回填表土";
-      diag = "土體呈現鬆散未壓實狀態，可能為紅土層或剛鋪設的表層回填土，尚未建立穩固之顆粒咬合。"; 
+      optionsHTML = `<ul class="mat-list"><li><b>軟弱飽和黏土</b>：高含水軟泥，受壓易沉陷。</li><li><b>高液化潛能砂土</b>：震動極易液化。</li><li><b>鬆散粉泥層</b>：結構鬆散之沉積物。</li></ul>`;
+    } else if (lyr.vs <= 130) {
       qa = "50 ~ 80 kPa";
+      optionsHTML = `<ul class="mat-list"><li><b>紅土 / 鬆軟表土</b>：剛鋪設未壓實的紅土或回填土。</li><li><b>鬆散粉細砂</b>：尚未建立咬合的沙層。</li><li><b>一般硬度黏土</b>：正常含水量黏性土壤。</li></ul>`;
     } else if (lyr.vs <= 180) {
-      mat = "受壓飽和底土 (土加水) / 堅硬黏土";
-      diag = "受自重或上方道碴壓密之飽和底土。在此狀態下剪力波由穩定之土壤骨架傳遞，呈現正常波速範圍。"; 
-      qa = "80 ~ 150 kPa";
-    } else if (lyr.vs <= 260) {
-      mat = "壓實碎石道碴 / 密實砂礫石層";
-      diag = "高強度粗粒料（石頭），顆粒互鎖效應顯著，抗剪強度極高。"; 
-      qa = "150 ~ 300 kPa";
-    } else if (lyr.vs <= 350) {
-      mat = "卵礫石層 / 極緻密砂石";
-      diag = "大顆石頭（卵石、礫石）與砂土緊密混合，非常堅硬，承載力極佳。"; 
+      qa = "90 ~ 150 kPa";
+      optionsHTML = `<ul class="mat-list"><li><b>壓密飽和底土</b>：受自重壓密良好的深層底土。</li><li><b>中等緊密砂土</b>：已產生基本咬合的沙層。</li><li><b>堅硬黏土</b>：承載穩固的硬質黏土層。</li></ul>`;
+    } else if (lyr.vs <= 280) {
+      qa = "200 ~ 300 kPa";
+      optionsHTML = `<ul class="mat-list"><li><b>壓實碎石道碴</b>：經夯實的碎石層，互鎖強烈。</li><li><b>密實礫石層</b>：天然緊密礫石地層。</li><li><b>極緊密砂土</b>：重度壓實的高剛性沙層。</li></ul>`;
+    } else if (lyr.vs <= 400) {
       qa = "300 ~ 500 kPa";
-    } else if (lyr.vs <= 500) {
-      mat = "強風化軟岩 (如泥岩、頁岩) / 瀝青鋪面";
-      diag = "具備岩體基本結構但受風化影響較軟之岩盤；或是剛性的人造瀝青鋪面。"; 
-      qa = "500 ~ 800 kPa";
-    } else if (lyr.vs <= 760) {
-      mat = "中度風化岩盤 (如砂岩、玄武岩) / 混凝土層";
-      diag = "連續性良好之工程基岩面（矽質砂岩、玄武岩等），或為土槽底部的混凝土剛性結構。"; 
-      qa = "800 ~ 1200 kPa";
+      optionsHTML = `<ul class="mat-list"><li><b>膠結卵礫石</b>：大顆卵石與沙子緊密混合，極為堅硬。</li><li><b>風化軟岩 (如泥岩、頁岩)</b>：具岩體結構但較軟。</li><li><b>極緻密砂石層</b>：天然沉積物，承載力極佳。</li></ul>`;
+    } else if (lyr.vs <= 700) {
+      qa = "500 ~ 1000 kPa";
+      optionsHTML = `<ul class="mat-list"><li><b>矽質砂岩 / 玄武岩 (中度風化)</b>：連續性良好的岩盤。</li><li><b>混凝土層 / 瀝青鋪面</b>：人造剛性結構體。</li></ul>`;
     } else {
-      mat = "堅硬微風化基岩 / 金屬底板高頻反射";
-      diag = "極端堅硬的純石頭/基岩層，或為金屬大土槽底板所產生的超高速物理反射邊界。"; 
-      qa = "> 1200 kPa (極高)";
+      qa = "> 1000 kPa (極高)";
+      optionsHTML = `<ul class="mat-list"><li><b>堅硬岩盤 (微風化純岩石)</b>：剛性極高的純石層。</li><li><b>金屬底板反射</b>：土槽鋼板產生的高速物理反射。</li></ul>`;
     }
 
     container.innerHTML += `
       <div class="layer-card" style="border-left-color:${colorTag};">
         <div class="layer-head">
-          <span style="color:${colorTag};">第 ${lyr.id} 層：${mat}</span>
+          <span style="color:${colorTag};">第 ${lyr.id} 層 (波速: ${lyr.vs} m/s)</span>
           <span style="color:#0284c7;">深度: ${lyr.top.toFixed(2)} ~ ${lyr.bot.toFixed(2)} m (厚: ${lyr.h.toFixed(2)}m)</span>
         </div>
         <div class="data-grid">
-          <div class="data-box"><div class="data-label">平均波速 (Vs)</div><div class="data-val" style="color:${colorTag};">${lyr.vs} m/s</div></div>
           <div class="data-box"><div class="data-label">剪力模數 (Gmax)</div><div class="data-val">${gmax.toFixed(1)} MPa</div></div>
           <div class="data-box"><div class="data-label">容許承載力評估</div><div class="data-val">${qa}</div></div>
         </div>
-        <div class="desc-box"><b>可能之真實狀態：</b>${diag}</div>
+        <div class="desc-box">
+          <b>可能之材質與岩土狀態：</b>
+          ${optionsHTML}
+        </div>
       </div>
     `;
   });
 
   document.getElementById('outCard').style.display = "block";
-  document.getElementById('outCard').scrollIntoView({ behavior: 'smooth' });
 }
 </script>
 </body>
